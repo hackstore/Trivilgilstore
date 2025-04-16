@@ -18,7 +18,7 @@ from telegram.ext import (
     filters,
     ConversationHandler
 )
-from threading import thread
+import threading
 import asyncio
 
 def run_bot():
