@@ -154,9 +154,12 @@ def run_bot():
     bot_app.run_polling()
 
 if __name__ == '__main__':
-    # Start Telegram bot in a separate thread
+    import logging
+    logging.basicConfig(level=logging.INFO)
+
+  
     bot_thread = threading.Thread(target=run_bot)
     bot_thread.start()
 
-    # Start Flask app in the main thread
-    app.run(port=5000)
+    port = int(os.environ.get("PORT", 5000))  # Use Render-assigned port
+    app.run(host="0.0.0.0", port=port)
