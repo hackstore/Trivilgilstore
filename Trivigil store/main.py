@@ -18,7 +18,12 @@ from telegram.ext import (
     filters,
     ConversationHandler
 )
-import threading
+from threading import thread
+import asyncio
+
+def run_bot():
+    asyncio.run(bot_app.run_polling())
+
 
 # Initialize Flask app
 app = Flask(__name__)
