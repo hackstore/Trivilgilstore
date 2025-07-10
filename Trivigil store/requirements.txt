@@ -2,3 +2,13 @@ python-dotenv
 Flask
 pymongo
 python-telegram-bot==20.7
+google-generativeai==0.3.2
+sqlite3
+asyncio
+datetime
+typing
+functools
+logging
+os
+json
+re
