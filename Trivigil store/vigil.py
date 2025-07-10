@@ -119,7 +119,7 @@ class VigilAIBot:
             (user_id, username, first_name, last_name, registration_date)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
         ''', (user_id, username, first_name, last_name))
-        
+
         # Update existing user
         cursor.execute('''
             UPDATE users 
@@ -532,7 +532,7 @@ Let's get started! What would you like to know? 🤔
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors"""
         logger.error(f"Exception while handling an update: {context.error}")
-        
+
         try:
             if update.message:
                 await update.message.reply_text(
@@ -600,7 +600,7 @@ Let's get started! What would you like to know? 🤔
         # Set bot commands
         async def set_commands_job(context: ContextTypes.DEFAULT_TYPE):
             await self.set_bot_commands(application)
-            
+
         application.job_queue.run_once(set_commands_job, when=1)
 
         # Start the bot
@@ -617,3 +617,60 @@ Let's get started! What would you like to know? 🤔
 if __name__ == "__main__":
     bot = VigilAIBot()
     bot.run()
+    
+    from flask import Flask, jsonify, render_template_string
+    
+    app = Flask(__name__)
+    # Simple HTML template
+    
+    HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VigilAI Status</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f7f7f7; text-align: center; padding-top: 100px; }
+        h1 { color: #333; }
+        .stats { margin-top: 30px; font-size: 18px; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>🤖 VigilAI Bot is Running</h1>
+    <div class="stats">
+        <p>Total Users: {{ total_users }}</p>
+        <p>Active Today: {{ active_today }}</p>
+    </div>
+</body>
+</html>
+"""
+
+@app.route("/")
+def index():
+    # Access database
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users')
+    total_users = cursor.fetchone()[0]
+    cursor.execute('SELECT COUNT(*) FROM users WHERE DATE(last_activity) = DATE("now")')
+    active_today = cursor.fetchone()[0]
+    conn.close()
+
+    return render_template_string(HTML_TEMPLATE, total_users=total_users, active_today=active_today)
+
+def start_flask():
+    app.run(host="0.0.0.0", port=5000)
+
+if __name__ == "__main__":
+    bot = VigilAIBot()
+    bot.run()
+
+    # Run Flask server in parallel
+    flask_thread = threading.Thread(target=start_flask, daemon=True)
+    flask_thread.start()
+
+    # Keep the main thread alive
+    while True:
+        try:
+            asyncio.sleep(3600)
+        except KeyboardInterrupt:
+            break
