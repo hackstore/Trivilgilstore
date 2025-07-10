@@ -3,10 +3,9 @@ import logging
 import sqlite3
 import asyncio
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import json
-import re
 from functools import wraps
 
 import google.generativeai as genai
@@ -17,6 +16,7 @@ from telegram.ext import (
 )
 from telegram.constants import ChatType, ParseMode
 from telegram.error import TelegramError
+from flask import Flask, render_template_string
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +33,28 @@ DB_PATH = 'vigilai_bot.db'
 
 # Conversation states
 BROADCAST_MESSAGE = 1
+
+# Flask HTML template
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>VigilAI Status</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f7f7f7; text-align: center; padding-top: 100px; }
+        h1 { color: #333; }
+        .stats { margin-top: 30px; font-size: 18px; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>🤖 VigilAI Bot is Running</h1>
+    <div class="stats">
+        <p>Total Users: {{ total_users }}</p>
+        <p>Active Today: {{ active_today }}</p>
+    </div>
+</body>
+</html>
+"""
 
 class VigilAIBot:
     def __init__(self):
@@ -104,6 +126,10 @@ class VigilAIBot:
 
     def setup_genai(self):
         """Configure Google Generative AI"""
+        if not GOOGLE_API_KEY:
+            logger.error("GOOGLE_API_KEY is not set!")
+            return
+        
         genai.configure(api_key=GOOGLE_API_KEY)
         self.model = genai.GenerativeModel('gemini-pro')
 
@@ -177,7 +203,7 @@ class VigilAIBot:
             return {
                 'registration_date': result[0],
                 'message_count': result[1],
-                'is_premium': result[2]
+                'is_premium': bool(result[2])
             }
         return None
 
@@ -215,6 +241,9 @@ class VigilAIBot:
     async def generate_ai_response(self, prompt: str, user_id: int) -> str:
         """Generate AI response using Google Generative AI"""
         try:
+            if not hasattr(self, 'model'):
+                return "⚠️ AI service is not configured properly. Please contact the administrator."
+            
             # Add context and personality to the prompt
             enhanced_prompt = f"""
             You are VigilAI, a helpful and knowledgeable AI assistant. 
@@ -262,7 +291,7 @@ I'm your intelligent AI assistant ready to help you with:
 
 **How to use me:**
 • Send me any message for a chat
-• Use /askAi <your question> in groups
+• Use /askai <your question> in groups
 • Try /help for all commands
 
 Let's get started! What would you like to know? 🤔
@@ -288,7 +317,7 @@ Let's get started! What would you like to know? 🤔
 **For Everyone:**
 • `/start` - Get started with VigilAI
 • `/help` - Show this help message
-• `/askAi <question>` - Ask AI in groups
+• `/askai <question>` - Ask AI in groups
 • `/stats` - View your usage statistics
 • `/feedback <message>` - Send feedback
 • `/clear` - Clear your chat history
@@ -319,7 +348,7 @@ Let's get started! What would you like to know? 🤔
         self.log_usage(update.effective_user.id, 'help')
 
     async def ask_ai_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /askAi command"""
+        """Handle /askai command"""
         user_id = update.effective_user.id
 
         # Check rate limiting
@@ -334,7 +363,7 @@ Let's get started! What would you like to know? 🤔
 
         # Get the question
         if not context.args:
-            await update.message.reply_text("❓ Please provide a question after /askAi\n\nExample: `/askAi What is artificial intelligence?`", parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text("❓ Please provide a question after /askai\n\nExample: `/askai What is artificial intelligence?`", parse_mode=ParseMode.MARKDOWN)
             return
 
         question = ' '.join(context.args)
@@ -384,7 +413,7 @@ Let's get started! What would you like to know? 🤔
             await update.message.reply_text("❌ User not found. Please use /start first.")
             return
 
-        registration_date = datetime.fromisoformat(stats['registration_date']).strftime('%Y-%m-%d')
+        registration_date = datetime.strptime(stats['registration_date'], "%Y-%m-%d %H:%M:%S").strftime('%Y-%m-%d')
         premium_status = "✅ Premium" if stats['is_premium'] else "🆓 Free"
 
         stats_text = f"""
@@ -416,9 +445,9 @@ Let's get started! What would you like to know? 🤔
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO feedback (user_id, message, rating)
-            VALUES (?, ?, ?)
-        ''', (user_id, feedback_text, 5))  # Default rating of 5
+            INSERT INTO feedback (user_id, message)
+            VALUES (?, ?)
+        ''', (user_id, feedback_text))
         conn.commit()
         conn.close()
 
@@ -523,9 +552,12 @@ Let's get started! What would you like to know? 🤔
         await query.answer()
 
         if query.data == "stats":
-            await self.stats_command(update, context)
+            # Create a fake update for stats command
+            fake_update = Update(update.update_id, message=query.message)
+            await self.stats_command(fake_update, context)
         elif query.data == "help":
-            await self.help_command(update, context)
+            fake_update = Update(update.update_id, message=query.message)
+            await self.help_command(fake_update, context)
         elif query.data == "feedback":
             await query.edit_message_text("📝 Use /feedback <your message> to send feedback!")
 
@@ -562,8 +594,11 @@ Let's get started! What would you like to know? 🤔
 
     def start_bot(self):
         """Start the bot in a background thread"""
-        if not BOT_TOKEN or not GOOGLE_API_KEY:
-            logger.error("Please set TELEGRAM_BOT_TOKEN and GOOGLE_API_KEY environment variables")
+        if not BOT_TOKEN:
+            logger.error("Please set TELEGRAM_BOT_TOKEN environment variable")
+            return
+        if not GOOGLE_API_KEY:
+            logger.error("Please set GOOGLE_API_KEY environment variable")
             return
 
         # Create application with job queue enabled
@@ -614,63 +649,39 @@ Let's get started! What would you like to know? 🤔
         self.bot_thread.start()
         logger.info("Bot thread started")
 
-if __name__ == "__main__":
-    bot = VigilAIBot()
-    bot.run()
-    
-    from flask import Flask, jsonify, render_template_string
-    
+def run_flask():
+    """Run Flask web server"""
     app = Flask(__name__)
-    # Simple HTML template
-    
-    HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>VigilAI Status</title>
-    <style>
-        body { font-family: sans-serif; background-color: #f7f7f7; text-align: center; padding-top: 100px; }
-        h1 { color: #333; }
-        .stats { margin-top: 30px; font-size: 18px; color: #666; }
-    </style>
-</head>
-<body>
-    <h1>🤖 VigilAI Bot is Running</h1>
-    <div class="stats">
-        <p>Total Users: {{ total_users }}</p>
-        <p>Active Today: {{ active_today }}</p>
-    </div>
-</body>
-</html>
-"""
 
-@app.route("/")
-def index():
-    # Access database
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM users')
-    total_users = cursor.fetchone()[0]
-    cursor.execute('SELECT COUNT(*) FROM users WHERE DATE(last_activity) = DATE("now")')
-    active_today = cursor.fetchone()[0]
-    conn.close()
+    @app.route("/")
+    def index():
+        # Access database
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM users')
+        total_users = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM users WHERE DATE(last_activity) = DATE("now")')
+        active_today = cursor.fetchone()[0]
+        conn.close()
 
-    return render_template_string(HTML_TEMPLATE, total_users=total_users, active_today=active_today)
+        return render_template_string(HTML_TEMPLATE, total_users=total_users, active_today=active_today)
 
-def start_flask():
     app.run(host="0.0.0.0", port=5000)
 
 if __name__ == "__main__":
+    # Initialize and start the bot
     bot = VigilAIBot()
     bot.run()
 
     # Run Flask server in parallel
-    flask_thread = threading.Thread(target=start_flask, daemon=True)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
+    logger.info("Flask server started")
 
     # Keep the main thread alive
-    while True:
-        try:
-            asyncio.sleep(3600)
-        except KeyboardInterrupt:
-            break
+    logger.info("Main thread running")
+    try:
+        while True:
+            time.sleep(3600)  # Sleep for 1 hour
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
