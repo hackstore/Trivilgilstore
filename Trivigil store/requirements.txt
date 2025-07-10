@@ -1,5 +1,7 @@
-Flask
+flask==3.0.3
 pymongo
 python-telegram-bot==20.6
 google-generativeai==0.5.1
 python-dotenv==1.0.1
+
+python-telegram-bot[job-queue]==20.6
