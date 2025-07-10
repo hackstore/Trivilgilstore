@@ -2,6 +2,7 @@ import os
 import logging
 import sqlite3
 import asyncio
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import json
@@ -40,6 +41,7 @@ class VigilAIBot:
         self.setup_genai()
         self.user_sessions = {}
         self.rate_limits = {}
+        self.running = False
 
     def init_database(self):
         """Initialize SQLite database"""
@@ -558,14 +560,14 @@ Let's get started! What would you like to know? 🤔
 
         await application.bot.set_my_commands(commands)
 
-    def run(self):
-        """Run the bot"""
+    def start_bot(self):
+        """Start the bot in a background thread"""
         if not BOT_TOKEN or not GOOGLE_API_KEY:
             logger.error("Please set TELEGRAM_BOT_TOKEN and GOOGLE_API_KEY environment variables")
             return
 
-        # Create application
-        application = Application.builder().token(BOT_TOKEN).build()
+        # Create application with job queue enabled
+        application = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
 
         # Add handlers
         application.add_handler(CommandHandler("start", self.start_command))
@@ -603,7 +605,14 @@ Let's get started! What would you like to know? 🤔
 
         # Start the bot
         logger.info("Starting VigilAI Bot...")
+        self.running = True
         application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    def run(self):
+        """Run the bot in a separate thread"""
+        self.bot_thread = threading.Thread(target=self.start_bot, daemon=True)
+        self.bot_thread.start()
+        logger.info("Bot thread started")
 
 if __name__ == "__main__":
     bot = VigilAIBot()
