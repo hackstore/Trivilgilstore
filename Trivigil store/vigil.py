@@ -26,9 +26,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN','8129010584:AAFAnKUW1HtMTOSEhG2aP_ltKzXRmumauU4')
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY','AIzaSyDSX1WS965MovldMGq15en0PbnGhqZqmq4')
-ADMIN_USER_IDS = [int(id) for id in os.getenv('ADMIN_USER_IDS', '7958752113').split(',') if id.strip()]
+BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+ADMIN_USER_IDS = [int(id) for id in os.getenv('ADMIN_USER_IDS', '').split(',') if id.strip()]
 DB_PATH = 'vigilai_bot.db'
 
 # Conversation states
@@ -64,6 +64,7 @@ class VigilAIBot:
         self.user_sessions = {}
         self.rate_limits = {}
         self.running = False
+        self.application = None
 
     def init_database(self):
         """Initialize SQLite database"""
@@ -132,6 +133,7 @@ class VigilAIBot:
         
         genai.configure(api_key=GOOGLE_API_KEY)
         self.model = genai.GenerativeModel('gemini-pro')
+        logger.info("Google Generative AI configured successfully")
 
     def register_user(self, user_id: int, username: str = None, 
                      first_name: str = None, last_name: str = None):
@@ -158,6 +160,7 @@ class VigilAIBot:
 
         conn.commit()
         conn.close()
+        logger.info(f"Registered/updated user: {user_id}")
 
     def update_user_activity(self, user_id: int):
         """Update user's last activity and increment message count"""
@@ -172,6 +175,7 @@ class VigilAIBot:
 
         conn.commit()
         conn.close()
+        logger.debug(f"Updated activity for user: {user_id}")
 
     def log_usage(self, user_id: int, command: str, tokens_used: int = 0):
         """Log usage statistics"""
@@ -185,6 +189,7 @@ class VigilAIBot:
 
         conn.commit()
         conn.close()
+        logger.info(f"Logged usage: user={user_id}, command={command}, tokens={tokens_used}")
 
     def get_user_stats(self, user_id: int) -> Dict:
         """Get user statistics"""
@@ -221,6 +226,7 @@ class VigilAIBot:
 
         # Check if user has exceeded rate limit (20 messages per hour)
         if len(self.rate_limits[user_id]) >= 20:
+            logger.warning(f"Rate limit exceeded for user: {user_id}")
             return True
 
         self.rate_limits[user_id].append(now)
@@ -267,6 +273,7 @@ class VigilAIBot:
             tokens_used = len(prompt.split()) + len(response.text.split())
             self.log_usage(user_id, 'ai_chat', tokens_used)
 
+            logger.info(f"Generated AI response for user: {user_id}")
             return ai_response
 
         except Exception as e:
@@ -593,57 +600,62 @@ Let's get started! What would you like to know? 🤔
         await application.bot.set_my_commands(commands)
 
     def start_bot(self):
-        """Start the bot in a background thread"""
+        """Start the bot"""
         if not BOT_TOKEN:
-            logger.error("Please set TELEGRAM_BOT_TOKEN environment variable")
+            logger.error("TELEGRAM_BOT_TOKEN environment variable is not set!")
             return
         if not GOOGLE_API_KEY:
-            logger.error("Please set GOOGLE_API_KEY environment variable")
+            logger.error("GOOGLE_API_KEY environment variable is not set!")
             return
 
-        # Create application with job queue enabled
-        application = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
+        try:
+            # Create application with job queue enabled
+            self.application = Application.builder().token(BOT_TOKEN).concurrent_updates(True).build()
 
-        # Add handlers
-        application.add_handler(CommandHandler("start", self.start_command))
-        application.add_handler(CommandHandler("help", self.help_command))
-        application.add_handler(CommandHandler("askai", self.ask_ai_command))
-        application.add_handler(CommandHandler("stats", self.stats_command))
-        application.add_handler(CommandHandler("feedback", self.feedback_command))
-        application.add_handler(CommandHandler("clear", self.clear_command))
-        application.add_handler(CommandHandler("users", self.users_command))
+            # Add handlers
+            self.application.add_handler(CommandHandler("start", self.start_command))
+            self.application.add_handler(CommandHandler("help", self.help_command))
+            self.application.add_handler(CommandHandler("askai", self.ask_ai_command))
+            self.application.add_handler(CommandHandler("stats", self.stats_command))
+            self.application.add_handler(CommandHandler("feedback", self.feedback_command))
+            self.application.add_handler(CommandHandler("clear", self.clear_command))
+            self.application.add_handler(CommandHandler("users", self.users_command))
 
-        # Broadcast conversation handler
-        broadcast_handler = ConversationHandler(
-            entry_points=[CommandHandler("broadcast", self.broadcast_command)],
-            states={
-                BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_broadcast_message)]
-            },
-            fallbacks=[]
-        )
-        application.add_handler(broadcast_handler)
+            # Broadcast conversation handler
+            broadcast_handler = ConversationHandler(
+                entry_points=[CommandHandler("broadcast", self.broadcast_command)],
+                states={
+                    BROADCAST_MESSAGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_broadcast_message)]
+                },
+                fallbacks=[]
+            )
+            self.application.add_handler(broadcast_handler)
 
-        # Button handler
-        application.add_handler(CallbackQueryHandler(self.button_handler))
+            # Button handler
+            self.application.add_handler(CallbackQueryHandler(self.button_handler))
 
-        # Message handler
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+            # Message handler
+            self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
 
-        # Error handler
-        application.add_error_handler(self.error_handler)
+            # Error handler
+            self.application.add_error_handler(self.error_handler)
 
-        # Set bot commands
-        async def set_commands_job(context: ContextTypes.DEFAULT_TYPE):
-            await self.set_bot_commands(application)
+            # Set bot commands
+            async def set_commands_job(context: ContextTypes.DEFAULT_TYPE):
+                await self.set_bot_commands(self.application)
 
-        application.job_queue.run_once(set_commands_job, when=1)
+            self.application.job_queue.run_once(set_commands_job, when=1)
 
-        # Start the bot
-        logger.info("Starting VigilAI Bot...")
-        self.running = True
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+            # Start the bot
+            logger.info("Starting VigilAI Bot polling...")
+            self.running = True
+            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+            
+        except Exception as e:
+            logger.error(f"Failed to start bot: {e}")
+            raise
 
-    def run(self):
+    def run_bot(self):
         """Run the bot in a separate thread"""
         self.bot_thread = threading.Thread(target=self.start_bot, daemon=True)
         self.bot_thread.start()
@@ -651,27 +663,32 @@ Let's get started! What would you like to know? 🤔
 
 def run_flask():
     """Run Flask web server"""
-    app = Flask(__name__)
+    try:
+        app = Flask(__name__)
 
-    @app.route("/")
-    def index():
-        # Access database
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM users')
-        total_users = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM users WHERE DATE(last_activity) = DATE("now")')
-        active_today = cursor.fetchone()[0]
-        conn.close()
+        @app.route("/")
+        def index():
+            # Access database
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM users')
+            total_users = cursor.fetchone()[0]
+            cursor.execute('SELECT COUNT(*) FROM users WHERE DATE(last_activity) = DATE("now")')
+            active_today = cursor.fetchone()[0]
+            conn.close()
 
-        return render_template_string(HTML_TEMPLATE, total_users=total_users, active_today=active_today)
+            return render_template_string(HTML_TEMPLATE, total_users=total_users, active_today=active_today)
 
-    app.run(host="0.0.0.0", port=5000)
+        logger.info("Starting Flask server on port 5000")
+        app.run(host="0.0.0.0", port=5000, use_reloader=False)
+        
+    except Exception as e:
+        logger.error(f"Flask server failed: {e}")
 
 if __name__ == "__main__":
     # Initialize and start the bot
     bot = VigilAIBot()
-    bot.run()
+    bot.run_bot()  # Fixed method name
 
     # Run Flask server in parallel
     flask_thread = threading.Thread(target=run_flask, daemon=True)
@@ -685,3 +702,6 @@ if __name__ == "__main__":
             time.sleep(3600)  # Sleep for 1 hour
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+        if bot.application:
+            bot.application.stop()
+            bot.application.shutdown()
