@@ -26,9 +26,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
-ADMIN_USER_IDS = [int(id) for id in os.getenv('ADMIN_USER_IDS', '').split(',') if id.strip()]
+BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN','8129010584:AAFAnKUW1HtMTOSEhG2aP_ltKzXRmumauU4')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY','AIzaSyDSX1WS965MovldMGq15en0PbnGhqZqmq4')
+ADMIN_USER_IDS = [int(id) for id in os.getenv('ADMIN_USER_IDS', '7958752113').split(',') if id.strip()]
 DB_PATH = 'vigilai_bot.db'
 
 # Conversation states
