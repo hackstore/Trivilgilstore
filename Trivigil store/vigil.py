@@ -216,7 +216,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     register_user(user)
     await update.message.reply_text(
-        "👋 Hello! I'm your Gemini-powered assistant. Use /askai followed by your question to chat with me.\n\n"
+        "👋 Hello! I'm VigilAI your AI based assistant. Use /askai followed by your question to chat with me.\n\n"
         "Other commands:\n"
         "/help - Show help\n"
         "/reset - Reset conversation context\n"
